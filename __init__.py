@@ -4,15 +4,17 @@ bnb-airdrop-autopilot - a complete system for BSC airdrops & free mints.
 Registers four model-callable tools (all read-only except prepare, which
 only PREVIEWS a transaction and never executes):
 
-* bnb.scan_airdrops  - find new BSC tokens (Dexscreener, no login needed)
-* bnb.check_contract - safety audit of one contract (owner, proxy,
+* bnb_scan_airdrops  - find new BSC tokens (Dexscreener, no login needed)
+* bnb_check_contract - safety audit of one contract (owner, proxy,
   approvals in bytecode, Sourcify verification, DEX liquidity, risk rating)
-* bnb.prepare_claim  - preview a claim call via baw (returns requestId;
-  NOTHING is broadcast; execution needs the user to say GAS, separately)
-* bnb.gas_report     - current BSC gas price + cheapest-claim recommendation
+* bnb_prepare_claim  - preview a claim call via baw (returns requestId;
+  NOTHING is broadcast; to execute, the user runs the command themselves
+  in their own terminal - the agent never runs it)
+* bnb_gas_report     - current BSC gas price + cheapest-claim recommendation
 
 Safe by design: the plugin never auto-executes, never signs, and never
-spends. A claim only moves after the user says GAS on a shown preview.
+spends. A claim only moves when the user runs the execute command
+themselves in their own terminal.
 """
 
 from __future__ import annotations
@@ -23,11 +25,11 @@ from typing import Any
 
 from tools.registry import tool_error, tool_result
 
-import executor as _executor
-import notifier as _notifier
-import safety as _safety
-import scanner as _scanner
-from _evm_base import CHAINS, _rpc
+from . import executor as _executor
+from . import notifier as _notifier
+from . import safety as _safety
+from . import scanner as _scanner
+from ._evm_base import CHAINS, _rpc
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ SCAN_SCHEMA = {
         "Scan for newly listed BSC tokens (free-mint / airdrop candidates) "
         "via Dexscreener's public API. Returns the newest BSC token profiles. "
         "These are NEW tokens, not confirmed airdrops - always run "
-        "bnb.check_contract on an address before any claim."
+        "bnb_check_contract on an address before any claim."
     ),
     "parameters": {
         "type": "object",
@@ -87,8 +89,9 @@ PREPARE_SCHEMA = {
         "PREVIEW a claim transaction via the baw CLI (Binance Agentic Wallet). "
         "This only simulates the call and returns the preview (requestId, "
         "value, gas, risk). NOTHING is broadcast and nothing is signed. "
-        "Execution needs the user to say GAS afterwards, as a separate step. "
-        "Use this when the user says 'siapkan claim' for a contract address "
+        "To execute, the user runs the execute command themselves in their "
+        "own terminal (the agent cannot run it). "
+        "Use this when the user asks to prepare a claim for a contract address "
         "and calldata they provide."
     ),
     "parameters": {
@@ -161,7 +164,7 @@ def _handle_check(args: dict, **kwargs: Any) -> str:
     except ValueError as exc:
         return tool_error(str(exc), address=address, chain=chain)
     except Exception as exc:  # noqa: BLE001 - surface RPC failures cleanly
-        logger.warning("bnb.check_contract RPC failure: %s", exc)
+        logger.warning("bnb_check_contract RPC failure: %s", exc)
         return tool_error("contract check failed: %s" % exc, address=address, chain=chain)
     result["telegram_message"] = _notifier.format_risk_message(result)
     return tool_result({"success": True, "contract": result})
@@ -199,13 +202,13 @@ def _handle_gas(args: dict, **kwargs: Any) -> str:
     # A plain claim is roughly 100-200k gas; show the cost at current price.
     est_claim_bnb = (gas_wei * 150000) / 1e18
     if gas_gwei <= 0.2:
-        rec = "Gas SANGAT murah (<=0.2 gwei) - waktu yang bagus untuk claim."
+        rec = "Gas is VERY cheap (<=0.2 gwei) - a great time to claim."
     elif gas_gwei <= 1.0:
-        rec = "Gas murah (<=1 gwei) - claim sekarang masih oke."
+        rec = "Gas is cheap (<=1 gwei) - still fine to claim now."
     elif gas_gwei <= 3.0:
-        rec = "Gas sedang (<=3 gwei) - claim boleh, tapi tunggu sebentar bisa lebih murah."
+        rec = "Gas is moderate (<=3 gwei) - you can claim, but waiting a bit may be cheaper."
     else:
-        rec = "Gas MAHAL (>3 gwei) - sebaiknya tunggu sampai gas turun sebelum claim."
+        rec = "Gas is EXPENSIVE (>3 gwei) - better to wait for gas to drop before claiming."
     return tool_result(
         {
             "success": True,
@@ -222,28 +225,28 @@ def _handle_gas(args: dict, **kwargs: Any) -> str:
 def register(ctx: Any) -> None:
     """Plugin entry point - expose the four Autopilot tools."""
     ctx.register_tool(
-        name="bnb.scan_airdrops",
+        name="bnb_scan_airdrops",
         toolset="bnb_airdrop_autopilot",
         schema=SCAN_SCHEMA,
         handler=_handle_scan,
         description="Scan for newly listed BSC tokens (free-mint / airdrop candidates).",
     )
     ctx.register_tool(
-        name="bnb.check_contract",
+        name="bnb_check_contract",
         toolset="bnb_airdrop_autopilot",
         schema=CHECK_SCHEMA,
         handler=_handle_check,
         description="Safety-audit one token contract (owner, proxy, approvals, liquidity, risk).",
     )
     ctx.register_tool(
-        name="bnb.prepare_claim",
+        name="bnb_prepare_claim",
         toolset="bnb_airdrop_autopilot",
         schema=PREPARE_SCHEMA,
         handler=_handle_prepare,
-        description="PREVIEW a claim transaction via baw (no execution; user must say GAS).",
+        description="PREVIEW a claim transaction via baw (preview only; the user runs the execute command themselves).",
     )
     ctx.register_tool(
-        name="bnb.gas_report",
+        name="bnb_gas_report",
         toolset="bnb_airdrop_autopilot",
         schema=GAS_SCHEMA,
         handler=_handle_gas,

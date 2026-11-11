@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.request
 from typing import Any
@@ -30,6 +31,43 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT_S = 15
 _MAX_ADDR_LEN = 42
+
+
+def _minimal_env() -> dict[str, str]:
+    """Minimal environment for subprocess calls.
+
+    The child must NOT inherit the full Hermes environment (which holds
+    provider API keys). Only an explicit allowlist is passed through:
+
+    * PATH (to resolve the binary), HOME and LANG.
+    * The host's egress proxy + custom CA bundle vars (http_proxy,
+      https_proxy, all_proxy, no_proxy and their uppercase forms,
+      CURL_CA_BUNDLE, SSL_CERT_FILE, NODE_EXTRA_CA_CERTS) — this host
+      routes ALL outbound traffic through an egress proxy with its own
+      CA, so without them no network call succeeds at all. These are
+      host network config, not provider API keys; no API key is passed.
+    """
+    env: dict[str, str] = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    if os.environ.get("HOME"):
+        env["HOME"] = os.environ["HOME"]
+    env["LANG"] = os.environ.get("LANG", "C.UTF-8")
+    for key in (
+        "http_proxy",
+        "https_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
+        "CURL_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_USE_ENV_PROXY",
+    ):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    return env
 
 # --- selectors (first 4 bytes of keccak of the canonical signature) ---
 _SEL_NAME = "06fdde03"
@@ -129,6 +167,7 @@ def _http_post_json(url: str, body: bytes) -> dict:
             capture_output=True,
             text=True,
             timeout=_TIMEOUT_S + 5,
+            env=_minimal_env(),
         )
         if proc.returncode != 0:
             raise RuntimeError("curl exit %d: %s" % (proc.returncode, proc.stderr[:200]))

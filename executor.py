@@ -5,10 +5,10 @@ This module shells out to the Binance Agentic Wallet CLI (`baw`) to preview
 a contract call. Preview is read-only: it simulates the call and returns
 the requestId, value, gas and risk assessment WITHOUT broadcasting anything.
 
-Execution is deliberately NOT implemented here. After prepare_claim returns
-the preview, the user must say GAS; only then does a separate, explicit
-step run `baw contract-call execute --requestId <id>`. The plugin never
-auto-executes.
+Execution is deliberately NOT implemented here, and the preview result
+never tells the model to run the execute command. To execute, the user
+runs `baw contract-call execute --requestId <id>` THEMSELVES in their own
+terminal. The plugin never auto-executes.
 
 baw must be installed and paired on the machine running Hermes. The binary
 is located via PATH (shutil.which), so it works on the VM and on Termux.
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -27,11 +28,56 @@ logger = logging.getLogger(__name__)
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _HEX_RE = re.compile(r"^0x[0-9a-fA-F]*$")
+_NON_NEG_INT_RE = re.compile(r"^(0|[1-9][0-9]*)$")
+
+
+def _minimal_env() -> dict[str, str]:
+    """Minimal environment for subprocess calls.
+
+    The child must NOT inherit the full Hermes environment (which holds
+    provider API keys). Only an explicit allowlist is passed through:
+
+    * PATH (to resolve the binary), HOME (baw keeps its session under
+      ~/.baw) and LANG.
+    * The host's egress proxy + custom CA bundle vars (http_proxy,
+      https_proxy, all_proxy, no_proxy and their uppercase forms,
+      CURL_CA_BUNDLE, SSL_CERT_FILE, NODE_EXTRA_CA_CERTS) — this host
+      routes ALL outbound traffic through an egress proxy with its own
+      CA, so without them no network call succeeds at all. These are
+      host network config, not provider API keys; no API key is passed.
+    """
+    env: dict[str, str] = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    if os.environ.get("HOME"):
+        env["HOME"] = os.environ["HOME"]
+    env["LANG"] = os.environ.get("LANG", "C.UTF-8")
+    for key in (
+        "http_proxy",
+        "https_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
+        "CURL_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_USE_ENV_PROXY",
+    ):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    return env
+
+
+def _validate_value_wei(value_wei: str) -> str:
+    """value_wei must be a non-negative integer (decimal string)."""
+    value = (value_wei or "0").strip()
+    if not _NON_NEG_INT_RE.match(value):
+        raise ValueError("value_wei must be a non-negative integer (wei as a decimal string)")
+    return value
 
 
 def _find_baw() -> str | None:
-    import os
-
     found = shutil.which("baw")
     if found:
         return found
@@ -67,6 +113,7 @@ def prepare_claim(
         raise ValueError("inputData must be 0x-prefixed hex")
     if not input_data.startswith("0x"):
         input_data = "0x" + input_data
+    value_wei = _validate_value_wei(value_wei)
 
     baw = _find_baw()
     if not baw:
@@ -86,13 +133,13 @@ def prepare_claim(
         "--to",
         contract,
         "--value",
-        str(value_wei),
+        value_wei,
         "--inputData",
         input_data,
         "--json",
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=_minimal_env())
     except subprocess.TimeoutExpired:
         raise RuntimeError("baw preview timed out after 120s")
     except FileNotFoundError:
@@ -115,8 +162,9 @@ def prepare_claim(
         "preview": preview,
         "request_id": req_id,
         "note": (
-            "PREVIEW ONLY - nothing was broadcast. "
-            "To execute, the user must say GAS, then run: "
+            "PREVIEW ONLY - nothing was broadcast and nothing was signed. "
+            "To execute, run this command YOURSELF in your own terminal "
+            "(the agent cannot run it for you): "
             "baw contract-call execute --requestId <request_id>"
         ),
     }

@@ -22,7 +22,7 @@ import logging
 import urllib.request
 from typing import Any
 
-from _evm_base import CHAINS, _decode_address, _decode_string, _decode_uint, _rpc, _try_call
+from ._evm_base import CHAINS, _decode_address, _decode_string, _decode_uint, _rpc, _try_call
 
 logger = logging.getLogger(__name__)
 

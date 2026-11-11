@@ -4,7 +4,9 @@ Mocks `tools.registry` and a minimal `ctx`, imports the plugin, registers
 the four tools, then calls each handler against real public APIs/RPCs.
 Usage: python3 test_plugin.py
 """
+import importlib.util
 import json
+import os
 import sys
 import types
 
@@ -28,9 +30,21 @@ tools_mod.registry = registry
 sys.modules["tools"] = tools_mod
 sys.modules["tools.registry"] = registry
 
-sys.path.insert(0, "/home/hatch/workspace/hermes-plugin/bnb-airdrop-autopilot")
+_PLUGIN_DIR = "/home/hatch/workspace/hermes-plugin/bnb-airdrop-autopilot"
 
-import __init__ as plugin  # noqa: E402
+# Load the plugin as a package (Hermes loads a directory plugin as a
+# package, so relative imports like `from . import executor` must resolve).
+_pkg = types.ModuleType("bnb_airdrop_autopilot")
+_pkg.__path__ = [_PLUGIN_DIR]
+sys.modules["bnb_airdrop_autopilot"] = _pkg
+_spec = importlib.util.spec_from_file_location(
+    "bnb_airdrop_autopilot.__init__",
+    os.path.join(_PLUGIN_DIR, "__init__.py"),
+    submodule_search_locations=[_PLUGIN_DIR],
+)
+plugin = importlib.util.module_from_spec(_spec)
+sys.modules["bnb_airdrop_autopilot.__init__"] = plugin
+_spec.loader.exec_module(plugin)
 
 
 class FakeCtx:
@@ -44,20 +58,20 @@ class FakeCtx:
 def main():
     ctx = FakeCtx()
     plugin.register(ctx)
-    for name in ("bnb.scan_airdrops", "bnb.check_contract", "bnb.prepare_claim", "bnb.gas_report"):
+    for name in ("bnb_scan_airdrops", "bnb_check_contract", "bnb_prepare_claim", "bnb_gas_report"):
         assert name in ctx.tools, f"{name} did not register"
     print("register: OK - all 4 tools registered")
 
     # 1. gas_report (BSC)
-    print("\n--- bnb.gas_report ---")
-    d = json.loads(ctx.tools["bnb.gas_report"]({}))
+    print("\n--- bnb_gas_report ---")
+    d = json.loads(ctx.tools["bnb_gas_report"]({}))
     print("gas_price_gwei:", d.get("gas_price_gwei"), "| rec:", d.get("recommendation", "")[:80])
     assert d.get("success") is True and d.get("gas_price_gwei", 0) > 0
     print("gas_report: OK")
 
     # 2. check_contract (BUSD on BSC - known good)
-    print("\n--- bnb.check_contract (BUSD, BSC) ---")
-    d = json.loads(ctx.tools["bnb.check_contract"]({"address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56", "chain": "bsc"}))
+    print("\n--- bnb_check_contract (BUSD, BSC) ---")
+    d = json.loads(ctx.tools["bnb_check_contract"]({"address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56", "chain": "bsc"}))
     assert d.get("success") is True, d
     c = d["contract"]
     print("symbol:", c.get("symbol"), "| risk:", c.get("risk"), "| reasons:", c.get("risk_reasons"))
@@ -66,15 +80,15 @@ def main():
     print("check_contract: OK")
 
     # 3. check_contract bad address -> clean error
-    print("\n--- bnb.check_contract (bad address) ---")
-    d = json.loads(ctx.tools["bnb.check_contract"]({"address": "not-an-address"}))
+    print("\n--- bnb_check_contract (bad address) ---")
+    d = json.loads(ctx.tools["bnb_check_contract"]({"address": "not-an-address"}))
     print("error:", d.get("error"))
     assert "error" in d
     print("bad address: OK")
 
     # 4. scan_airdrops
-    print("\n--- bnb.scan_airdrops ---")
-    d = json.loads(ctx.tools["bnb.scan_airdrops"]({"limit": 5}))
+    print("\n--- bnb_scan_airdrops ---")
+    d = json.loads(ctx.tools["bnb_scan_airdrops"]({"limit": 5}))
     print("success:", d.get("success"), "| count:", d.get("count"))
     if d.get("success"):
         for cand in d.get("candidates", [])[:3]:
@@ -84,8 +98,8 @@ def main():
 
     # 5. prepare_claim - preview a harmless call (BUSD name() = read-only, value 0).
     #    Uses the real baw CLI. If baw is not paired this will fail cleanly.
-    print("\n--- bnb.prepare_claim (preview only, BUSD name()) ---")
-    d = json.loads(ctx.tools["bnb.prepare_claim"]({
+    print("\n--- bnb_prepare_claim (preview only, BUSD name()) ---")
+    d = json.loads(ctx.tools["bnb_prepare_claim"]({
         "contract": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
         "input_data": "0x06fdde03",
         "from_address": "0x404826e8819430B457C95765aAA807E9aBc75E4f",

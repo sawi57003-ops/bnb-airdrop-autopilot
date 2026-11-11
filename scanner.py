@@ -10,7 +10,7 @@ Sources that work WITHOUT a login or API key:
 
 What this does NOT do: it does not read X or Telegram (both need a login
 the agent does not have), and it does not promise a token is an airdrop -
-it surfaces NEW tokens so the user can run bnb.check_contract on them.
+it surfaces NEW tokens so the user can run bnb_check_contract on them.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def scan_airdrops(limit: int = 10) -> dict:
         "candidates": candidates,
         "note": (
             "These are NEW tokens, not confirmed airdrops. "
-            "Run bnb.check_contract on an address before any claim. "
+            "Run bnb_check_contract on an address before any claim. "
             "X/Telegram scanning needs a login the agent does not have."
         ),
     }
