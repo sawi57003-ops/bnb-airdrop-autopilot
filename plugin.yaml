@@ -1,0 +1,10 @@
+name: bnb-airdrop-autopilot
+version: 1.0.0
+description: "A complete system for BSC airdrops & free mints: scan for new tokens, safety-audit a contract (owner, proxy, approvals, Sourcify verification, DEX liquidity, risk rating), preview a claim via baw (never auto-executes), and report BSC gas with a cheapest-claim recommendation. Safe by design: nothing is broadcast or signed without the user saying GAS on a shown preview."
+author: sawi57003-ops
+hooks: []
+provides_tools:
+  - bnb.scan_airdrops
+  - bnb.check_contract
+  - bnb.prepare_claim
+  - bnb.gas_report
